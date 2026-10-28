@@ -381,6 +381,7 @@ export default function Home() {
         me={myLocation}
         onPeerClick={requestConnection}
         canConnect={conn.kind === "idle"}
+        onNotify={showNotice}
       />
 
       <Toast toast={notice} />

@@ -131,4 +131,29 @@ and no-store caching. CI runs it on a Postgres service container
 
 ## Phase 4 — Make it better
 
-Not built yet.
+**Signal Lock — the connection moment.** When two strangers connect:
+
+- The map frames both offset pins, leaving room for the chat drawer.
+- A great-circle arc (96 sampled points) draws between them with a wide glow, a
+  bright core, and a comet travelling along the path.
+- A two-note chime plays (optional; the mute preference lives in the HUD and in
+  `localStorage` only).
+- A `LOCKING ON → LINKED · ≈ 5,571 km` banner appears; the chat waits ~2.2s so
+  the moment lands before the interface takes over.
+- The distance stays in the chat header and empty state, reinforcing that there
+  is a real person on the other side of the planet.
+- **Find a spark** picks a random open stranger, flies to their dot, pulses a
+  reticle around it, and sends the normal connection request.
+
+Everything is client-side: no backend changes, one animation frame loop, and the
+distance is computed from the already-randomised offset coordinates (so it is
+approximate by design). Reduced motion skips the camera move, the draw delay and
+the banner, opening the chat immediately. The chime is muted with a button and
+never persisted server-side.
+
+Trade-offs: the cinematic adds ~2s before the chat; the banner explains the
+wait, and the animation is skipped for reduced motion. A modified client could
+bypass the delay — it is product theatre, not a security boundary.
+
+What I would build next with more time: a 3-minute "Spark" with mutual
+extension, a day/night terminator on the map, and a true 3D globe projection.

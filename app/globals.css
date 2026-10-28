@@ -1,79 +1,394 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ------------------------------------------------------------------ */
+/*  Design tokens — "signal in the dark"                               */
+/* ------------------------------------------------------------------ */
+
+@theme {
+  --color-ink: #05070c;
+  --color-ink-soft: #090d15;
+  --color-panel: #0b0f17;
+  --color-pulse: #5eead4;
+  --color-pulse-strong: #2dd4bf;
+  --color-ember: #fb7185;
+  --color-solar: #fbbf24;
+  --color-mist: #8b97a8;
+  --color-haze: #e6edf3;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-ink);
+    color: var(--color-haze);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgb(94 234 212 / 0.3);
+    color: #ffffff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-pulse);
+    outline-offset: 2px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ------------------------------------------------------------------ */
+/*  Atmosphere                                                         */
+/* ------------------------------------------------------------------ */
+
+.aurora {
+  background:
+    radial-gradient(90rem 60rem at 15% -10%, rgb(45 212 191 / 0.16), transparent 55%),
+    radial-gradient(70rem 50rem at 85% 10%, rgb(167 139 250 / 0.12), transparent 55%),
+    radial-gradient(60rem 45rem at 50% 110%, rgb(251 113 133 / 0.08), transparent 60%),
+    var(--color-ink);
 }
 
-/* Live user dots on the map */
-.pulse-dot {
-  width: 14px;
-  height: 14px;
+.grid-field {
+  background-image:
+    linear-gradient(to right, rgb(148 163 184 / 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(148 163 184 / 0.07) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(circle at 50% 45%, black 0%, transparent 72%);
+  -webkit-mask-image: radial-gradient(circle at 50% 45%, black 0%, transparent 72%);
+}
+
+.noise {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+
+.vignette {
+  background:
+    radial-gradient(120% 90% at 50% 45%, transparent 45%, rgb(5 7 12 / 0.55) 100%),
+    linear-gradient(to bottom, rgb(5 7 12 / 0.65), transparent 18%),
+    linear-gradient(to top, rgb(5 7 12 / 0.7), transparent 22%);
+}
+
+.hud-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.radar {
+  position: relative;
+  isolation: isolate;
+}
+
+.radar::before,
+.radar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
   border-radius: 9999px;
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  cursor: pointer;
+  border: 1px solid rgb(94 234 212 / 0.12);
+}
+
+.radar::after {
+  inset: 22%;
+}
+
+.radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 300deg,
+    rgb(94 234 212 / 0.16) 344deg,
+    rgb(94 234 212 / 0.42) 360deg
+  );
+  animation: radar-spin 8s linear infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Map markers                                                        */
+/* ------------------------------------------------------------------ */
+
+.pulse-dot {
+  position: relative;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  box-shadow: 0 0 0 rgba(255, 255, 255, 0.5);
-  animation: pulse-ring 2s ease-out infinite;
-  transition: transform 0.1s ease;
+  border: 0;
+  background: none;
+  color: var(--dot, #5eead4);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.pulse-dot:hover {
-  transform: scale(1.3);
+.pulse-dot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.16;
+  animation: ping-ring 2.8s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-/* The user's own "you are here" pin — small, sized like the dots. */
+.pulse-dot::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  border: 2px solid rgb(255 255 255 / 0.92);
+  box-shadow: 0 0 14px 2px color-mix(in srgb, currentColor 55%, transparent);
+  transition: transform 0.15s ease;
+}
+
+.pulse-dot:hover::after,
+.pulse-dot:focus-visible::after {
+  transform: scale(1.25);
+}
+
+.pulse-dot.is-busy {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.pulse-dot.is-busy::before {
+  animation: none;
+  opacity: 0.08;
+}
+
+.pulse-dot.is-busy::after {
+  border-style: dashed;
+}
+
+.pulse-dot-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  padding: 3px 8px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 9999px;
+  background: rgb(11 15 23 / 0.9);
+  color: var(--color-haze);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.pulse-dot:hover .pulse-dot-tip,
+.pulse-dot:focus-visible .pulse-dot-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* The user's own pin. */
 .pulse-me {
   position: relative;
-  font-size: 18px;
-  line-height: 1;
+  width: 30px;
+  height: 30px;
   cursor: default;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+
+.pulse-me::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  background: rgb(251 191 36 / 0.16);
+  animation: ping-ring 3.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.pulse-me-core {
+  position: absolute;
+  inset: 8px;
+  border-radius: 9999px;
+  background: var(--color-solar);
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 16px 3px rgb(251 191 36 / 0.6);
 }
 
 .pulse-me-label {
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% + 5px);
   left: 50%;
   transform: translateX(-50%);
-  margin-bottom: 1px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #ffffff;
-  background: rgba(0, 0, 0, 0.6);
-  padding: 0 5px;
+  padding: 3px 8px;
+  border: 1px solid rgb(251 191 36 / 0.35);
   border-radius: 9999px;
+  background: rgb(11 15 23 / 0.9);
+  color: var(--color-solar);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
   white-space: nowrap;
 }
 
-@keyframes pulse-ring {
+/* ------------------------------------------------------------------ */
+/*  Motion                                                             */
+/* ------------------------------------------------------------------ */
+
+@keyframes ping-ring {
   0% {
-    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4);
+    transform: scale(0.5);
+    opacity: 0.55;
   }
-  70% {
-    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0);
-  }
+  70%,
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+@keyframes radar-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -12px, 0);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.panel-in {
+  animation: rise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.drawer-in {
+  animation: slide-in-right 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sheet-in {
+  animation: sheet-up 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.toast-in {
+  animation: rise 0.24s ease-out both;
+}
+
+.fade-in {
+  animation: fade-in 0.2s ease-out both;
+}
+
+.drift-slow {
+  animation: drift 9s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Scrollbars + Mapbox chrome                                         */
+/* ------------------------------------------------------------------ */
+
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.25) transparent;
+}
+
+.scroll-slim::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 0.22);
+  border-radius: 9999px;
+}
+
+.mapboxgl-canvas {
+  outline: none;
+  filter: saturate(0.72) brightness(0.92) contrast(1.05);
+}
+
+.mapboxgl-ctrl-attrib.mapboxgl-compact,
+.mapboxgl-ctrl-attrib {
+  background: rgb(5 7 12 / 0.6) !important;
+  border-radius: 6px;
+}
+
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-attrib a {
+  color: var(--color-mist) !important;
+  font-size: 10px;
+}
+
+.mapboxgl-ctrl-logo {
+  opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

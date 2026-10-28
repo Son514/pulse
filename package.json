@@ -8,6 +8,8 @@
     "build": "npx prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "playwright test tests/api",
+    "test:api": "playwright test tests/api",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -21,6 +23,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/mapbox-gl": "^3.4.1",
     "@types/node": "^20",

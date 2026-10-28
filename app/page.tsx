@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import EntryGate from "./components/EntryGate";
 import WorldMap from "./components/WorldMap";
 import ConnectionPrompt from "./components/ConnectionPrompt";
@@ -10,6 +11,7 @@ import Toast, { type ToastData } from "./components/Toast";
 import { join, leave, poll, sendSignal } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
+import { dotColor } from "@/lib/colors";
 import { type PeerDot, type SignalMsg } from "@/lib/types";
 
 type Conn =
@@ -69,7 +71,10 @@ export default function Home() {
   }
 
   function addMessage(mine: boolean, text: string) {
-    setMessages((prev) => [...prev, { id: msgId.current++, mine, text }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: msgId.current++, mine, text, at: Date.now() },
+    ]);
   }
 
   function teardown(message?: string) {
@@ -373,6 +378,11 @@ export default function Home() {
   }
 
   const inChat = conn.kind === "connecting" || conn.kind === "connected";
+  const activePeerId =
+    conn.kind === "connecting" || conn.kind === "connected"
+      ? conn.peerId
+      : null;
+  const peerAccent = activePeerId ? dotColor(activePeerId) : "#5eead4";
 
   return (
     <main className="fixed inset-0 overflow-hidden">
@@ -387,11 +397,13 @@ export default function Home() {
       <Toast toast={notice} />
 
       {conn.kind === "requesting" && (
-        <div className="absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          <span>Requesting connection…</span>
+        <div className="panel-in absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full border border-white/10 bg-panel/85 px-4 py-2 text-sm text-haze shadow-xl shadow-black/30 backdrop-blur-xl">
+          <Loader2 aria-hidden className="h-4 w-4 animate-spin text-pulse" />
+          <span>Signalling…</span>
           <button
+            type="button"
             onClick={cancelRequest}
-            className="rounded-full bg-zinc-700 px-3 py-1 text-xs hover:bg-zinc-600"
+            className="rounded-full border border-white/10 px-3 py-1 text-xs text-mist transition hover:text-haze"
           >
             Cancel
           </button>
@@ -412,6 +424,7 @@ export default function Home() {
         <ChatPanel
           messages={messages}
           connected={conn.kind === "connected"}
+          accent={peerAccent}
           videoBusy={video !== "none"}
           onSend={(text) => {
             peerRef.current?.sendChat(text);
@@ -423,8 +436,9 @@ export default function Home() {
       )}
 
       {video === "requesting" && (
-        <div className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          Waiting for stranger to accept video…
+        <div className="panel-in absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-panel/85 px-4 py-2 text-sm text-haze shadow-xl shadow-black/30 backdrop-blur-xl">
+          <Loader2 aria-hidden className="h-4 w-4 animate-spin text-pulse" />
+          Waiting for the stranger to accept video…
         </div>
       )}
 

@@ -51,6 +51,7 @@ export default function Home() {
   const peerRef = useRef<PeerSession | null>(null);
   const msgId = useRef(0);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function showNotice(text: string) {
     setNotice(text);
@@ -63,6 +64,7 @@ export default function Home() {
 
   function teardown(message?: string) {
     if (requestTimer.current) clearTimeout(requestTimer.current);
+    if (disconnectTimer.current) clearTimeout(disconnectTimer.current);
     peerRef.current?.close();
     peerRef.current = null;
     setLocalStream(null);
@@ -82,8 +84,27 @@ export default function Home() {
       onControl: (ctrl) => handleControl(ctrl),
       onRemoteStream: (stream) => setRemoteStream(stream),
       onConnectionState: (state) => {
+        if (state === "connected") {
+          if (disconnectTimer.current) {
+            clearTimeout(disconnectTimer.current);
+            disconnectTimer.current = null;
+          }
+          return;
+        }
         if (state === "failed") {
+          // Tell the other side too — otherwise they sit in the chat forever.
+          void sendSignal(sessionId, peerId, "end");
           teardown("Connection failed (network).");
+          return;
+        }
+        if (state === "disconnected" && !disconnectTimer.current) {
+          // "disconnected" is often transient (network blip). Give it a few
+          // seconds to recover before ending the session for both peers.
+          disconnectTimer.current = setTimeout(() => {
+            disconnectTimer.current = null;
+            void sendSignal(sessionId, peerId, "end");
+            teardown("Connection lost.");
+          }, 8000);
         }
       },
       onChannelOpen: () => {

@@ -266,8 +266,10 @@ export default function Home() {
   }
 
   const processSignalRef = useRef(processSignal);
+  const teardownRef = useRef(teardown);
   useEffect(() => {
     processSignalRef.current = processSignal;
+    teardownRef.current = teardown;
   });
 
   useEffect(() => {
@@ -281,6 +283,21 @@ export default function Home() {
         if (!active) return;
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);
+
+        // If the peer we're talking to disappears from the map (tab closed,
+        // left, or went stale), end the session so we don't stay stuck busy.
+        const c = connRef.current;
+        if (c.kind !== "idle" && c.kind !== "requesting") {
+          const peerOnline = data.peers.some((p) => p.id === c.peerId);
+          if (!peerOnline) {
+            if (c.kind === "incoming") {
+              setConn({ kind: "idle" });
+            } else {
+              void sendSignal(sessionId, c.peerId, "end");
+              teardownRef.current("Stranger disconnected.");
+            }
+          }
+        }
       } catch {}
       if (active) timer = setTimeout(tick, POLL_INTERVAL_MS);
     };
@@ -304,8 +321,11 @@ export default function Home() {
   }, [sessionId, phase]);
 
   async function handleReady(lat: number, lng: number) {
-    setMyLocation({ lat, lng });
-    await join(sessionId, lat, lng);
+    // The server applies the 1–3 km privacy offset. Use the coordinates it
+    // returns so my own pin sits where everyone else sees me — not at my real
+    // location.
+    const pos = await join(sessionId, lat, lng);
+    setMyLocation({ lat: pos.lat, lng: pos.lng });
     setPhase("live");
   }
 

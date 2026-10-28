@@ -5,12 +5,14 @@ export async function join(
   id: string,
   lat: number,
   lng: number,
-): Promise<void> {
-  await fetch("/api/join", {
+): Promise<{ lat: number; lng: number }> {
+  const res = await fetch("/api/join", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, lat, lng }),
   });
+  if (!res.ok) throw new Error(`join failed: ${res.status}`);
+  return res.json();
 }
 
 export async function poll(id: string): Promise<PollResponse> {

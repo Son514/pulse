@@ -135,6 +135,9 @@ export default function WorldMap({
             .setLngLat([peer.lng, peer.lat])
             .addTo(map);
           markers.set(peer.id, marker);
+        } else {
+          // Keep existing dots in sync if their coordinates ever change.
+          marker.setLngLat([peer.lng, peer.lat]);
         }
         marker.getElement().style.opacity = peer.busy ? "0.35" : "1";
       }
@@ -169,7 +172,7 @@ export default function WorldMap({
 
       {/* Online count */}
       <div className="absolute bottom-4 left-4 rounded-full bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-300 backdrop-blur">
-        {peers.length} online
+        {peers.length + (me ? 1 : 0)} online
       </div>
     </div>
   );

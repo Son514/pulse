@@ -43,5 +43,7 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return Response.json({ ok: true });
+  // Return the offset coordinates so the client renders its own pin in exactly
+  // the same spot everyone else sees (never the raw geolocation position).
+  return Response.json({ ok: true, lat: offset.lat, lng: offset.lng });
 }

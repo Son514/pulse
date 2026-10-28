@@ -33,6 +33,11 @@ export default function Home() {
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(
     null,
   );
+  // Used by the poll loop (which shouldn't restart when the pin moves).
+  const myLocationRef = useRef(myLocation);
+  useEffect(() => {
+    myLocationRef.current = myLocation;
+  });
 
   const [conn, _setConn] = useState<Conn>({ kind: "idle" });
   const connRef = useRef<Conn>(conn);
@@ -300,7 +305,8 @@ export default function Home() {
 
     const tick = async () => {
       try {
-        const data = await poll(sessionId);
+        const me = myLocationRef.current;
+        const data = await poll(sessionId, me?.lat, me?.lng);
         if (!active) return;
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);

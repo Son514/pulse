@@ -15,8 +15,17 @@ export async function join(
   return res.json();
 }
 
-export async function poll(id: string): Promise<PollResponse> {
-  const res = await fetch(`/api/poll?id=${encodeURIComponent(id)}`, {
+export async function poll(
+  id: string,
+  lat?: number,
+  lng?: number,
+): Promise<PollResponse> {
+  const params = new URLSearchParams({ id });
+  if (lat !== undefined && lng !== undefined) {
+    params.set("lat", String(lat));
+    params.set("lng", String(lng));
+  }
+  const res = await fetch(`/api/poll?${params.toString()}`, {
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`poll failed: ${res.status}`);

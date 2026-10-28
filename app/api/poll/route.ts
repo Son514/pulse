@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STALE_MS, SIGNAL_TTL_MS } from "@/lib/presence";
+import { isValidLatLng } from "@/lib/geo";
 import type { PollResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -22,11 +23,26 @@ export async function GET(request: NextRequest) {
   const signalCutoff = new Date(now - SIGNAL_TTL_MS);
 
   // 1) Heartbeat — refresh lastSeen for the caller only. (Updating every row
-  // would keep abandoned sessions alive forever.)
-  await prisma.presence.updateMany({
-    where: { id },
-    data: { lastSeen: new Date(now) },
-  });
+  // would keep abandoned sessions alive forever.) If the caller supplies its
+  // offset coordinates, upsert: this re-registers a session whose row was
+  // reaped while its tab was asleep, throttled, or restored from bfcache.
+  const latParam = params.get("lat");
+  const lngParam = params.get("lng");
+  const lat = latParam ? Number(latParam) : NaN;
+  const lng = lngParam ? Number(lngParam) : NaN;
+
+  if (isValidLatLng(lat, lng)) {
+    await prisma.presence.upsert({
+      where: { id },
+      create: { id, lat: lat as number, lng: lng as number, busy: false, lastSeen: new Date(now) },
+      update: { lastSeen: new Date(now) },
+    });
+  } else {
+    await prisma.presence.updateMany({
+      where: { id },
+      data: { lastSeen: new Date(now) },
+    });
+  }
 
   // 2) Reap stale presence rows and orphaned signals (independent deletes —
   // no atomicity needed, and avoids transactions over a PgBouncer pooler).

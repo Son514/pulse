@@ -5,10 +5,16 @@ export type PeerControl =
   | "video-decline"
   | "video-end";
 
+export interface MediaState {
+  mic: boolean;
+  cam: boolean;
+}
+
 interface PeerCallbacks {
   onSignal: (type: DescType, payload: string) => void;
   onChat: (text: string) => void;
   onControl: (ctrl: PeerControl) => void;
+  onMediaState?: (state: MediaState) => void;
   onRemoteStream: (stream: MediaStream | null) => void;
   onConnectionState: (state: RTCPeerConnectionState) => void;
   onChannelOpen: () => void;
@@ -84,6 +90,12 @@ export class PeerSession {
           this.cb.onChat(msg.text);
         } else if (msg.t === "ctrl" && typeof msg.ctrl === "string") {
           this.cb.onControl(msg.ctrl as PeerControl);
+        } else if (
+          msg.t === "media" &&
+          typeof msg.mic === "boolean" &&
+          typeof msg.cam === "boolean"
+        ) {
+          this.cb.onMediaState?.({ mic: msg.mic, cam: msg.cam });
         }
       } catch {}
     };
@@ -164,6 +176,10 @@ export class PeerSession {
 
   sendControl(ctrl: PeerControl) {
     this.safeSend({ t: "ctrl", ctrl });
+  }
+
+  sendMediaState(state: MediaState) {
+    this.safeSend({ t: "media", ...state });
   }
 
   private safeSend(obj: unknown) {

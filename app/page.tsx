@@ -9,7 +9,7 @@ import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
 import Toast, { type ToastData } from "./components/Toast";
 import { join, leave, poll, sendSignal } from "@/lib/api";
-import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
+import { PeerSession, type DescType, type PeerControl, type MediaState } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { dotColor } from "@/lib/colors";
 import { type PeerDot, type SignalMsg } from "@/lib/types";
@@ -33,6 +33,8 @@ export default function Home() {
   const [notice, setNotice] = useState<ToastData | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [localMedia, setLocalMedia] = useState<MediaState>({ mic: true, cam: true });
+  const [remoteMedia, setRemoteMedia] = useState<MediaState>({ mic: true, cam: true });
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(
     null,
   );
@@ -84,6 +86,8 @@ export default function Home() {
     peerRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
+    setLocalMedia({ mic: true, cam: true });
+    setRemoteMedia({ mic: true, cam: true });
     setVideo("none");
     setMessages([]);
     setConn({ kind: "idle" });
@@ -98,6 +102,7 @@ export default function Home() {
       onChat: (text) => addMessage(false, text),
       onControl: (ctrl) => handleControl(ctrl),
       onRemoteStream: (stream) => setRemoteStream(stream),
+      onMediaState: (state) => setRemoteMedia(state),
       onConnectionState: (state) => {
         if (state === "connected") {
           if (disconnectTimer.current) {
@@ -140,6 +145,8 @@ export default function Home() {
           ps.startVideo()
             .then((stream) => {
               setLocalStream(stream);
+              setLocalMedia({ mic: true, cam: true });
+              ps.sendMediaState({ mic: true, cam: true });
               setVideo("active");
             })
             .catch(() => {
@@ -159,6 +166,8 @@ export default function Home() {
         ps?.stopVideo();
         setLocalStream(null);
         setRemoteStream(null);
+        setLocalMedia({ mic: true, cam: true });
+        setRemoteMedia({ mic: true, cam: true });
         setVideo("none");
         break;
     }
@@ -220,7 +229,9 @@ export default function Home() {
     ps.startVideo()
       .then((stream) => {
         setLocalStream(stream);
+        setLocalMedia({ mic: true, cam: true });
         ps.sendControl("video-accept");
+        ps.sendMediaState({ mic: true, cam: true });
         setVideo("active");
       })
       .catch(() => {
@@ -241,7 +252,33 @@ export default function Home() {
     ps?.sendControl("video-end");
     setLocalStream(null);
     setRemoteStream(null);
+    setLocalMedia({ mic: true, cam: true });
+    setRemoteMedia({ mic: true, cam: true });
     setVideo("none");
+  }
+
+  function toggleMic() {
+    const stream = localStream;
+    if (!stream) return;
+    const tracks = stream.getAudioTracks();
+    if (tracks.length === 0) return;
+    const mic = !tracks[0].enabled;
+    tracks.forEach((track) => (track.enabled = mic));
+    const next = { ...localMedia, mic };
+    setLocalMedia(next);
+    peerRef.current?.sendMediaState(next);
+  }
+
+  function toggleCamera() {
+    const stream = localStream;
+    if (!stream) return;
+    const tracks = stream.getVideoTracks();
+    if (tracks.length === 0) return;
+    const cam = !tracks[0].enabled;
+    tracks.forEach((track) => (track.enabled = cam));
+    const next = { ...localMedia, cam };
+    setLocalMedia(next);
+    peerRef.current?.sendMediaState(next);
   }
 
   function processSignal(sig: SignalMsg) {
@@ -461,6 +498,10 @@ export default function Home() {
         <VideoPanel
           localStream={localStream}
           remoteStream={remoteStream}
+          localMedia={localMedia}
+          remoteMedia={remoteMedia}
+          onToggleMic={toggleMic}
+          onToggleCamera={toggleCamera}
           onEnd={endVideo}
         />
       )}

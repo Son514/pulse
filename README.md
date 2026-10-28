@@ -59,6 +59,9 @@ one dot to connect, accept, chat, and start video.
 2. Copy `.env.example` to `.env` and fill in your own credentials:
    - A free Postgres database — [Neon](https://neon.tech) or Vercel Postgres.
    - A free [Mapbox token](https://account.mapbox.com/access-tokens/).
+   - A `SESSION_SECRET` for signed session tokens — generate one with
+     `openssl rand -base64 48`. It must be at least 32 characters and stays
+     server-side.
 3. Create the tables:
    ```bash
    npx prisma db push
@@ -80,6 +83,20 @@ different mock geolocation so the dots land apart, then connect.
 > something you need to solve.
 
 > There is a note in `AGENTS.md` about this codebase. Please read it.
+
+### API security tests
+
+The API is covered by a Playwright HTTP suite (no browser needed) that exercises
+authentication, cross-session access, forged signaling, input validation, mailbox
+limits and security headers:
+
+```bash
+npm run test:api
+```
+
+Run it against a **disposable** database — the suite creates and removes random
+ephemeral sessions. In CI it runs on a Postgres service container; see
+`.github/workflows/api-tests.yml`.
 
 ---
 

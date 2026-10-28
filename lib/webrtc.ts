@@ -24,6 +24,7 @@ export class PeerSession {
   private readonly polite: boolean;
   private makingOffer = false;
   private ignoreOffer = false;
+  private isSettingRemoteAnswerPending = false;
   private localStream: MediaStream | null = null;
   private closed = false;
   private readonly cb: PeerCallbacks;
@@ -47,6 +48,9 @@ export class PeerSession {
         if (this.pc.localDescription) {
           this.cb.onSignal("offer", JSON.stringify(this.pc.localDescription));
         }
+      } catch {
+        // A remote offer/rollback pre-empted us; the browser re-fires
+        // negotiationneeded if local changes still need negotiating.
       } finally {
         this.makingOffer = false;
       }
@@ -87,33 +91,59 @@ export class PeerSession {
 
   async handleSignal(type: DescType, payload: string) {
     if (this.closed) return;
-    const data = JSON.parse(payload);
+
+    let data: unknown;
+    try {
+      data = JSON.parse(payload);
+    } catch {
+      return;
+    }
 
     if (type === "ice") {
       if (!this.pc.remoteDescription) {
-        this.pendingCandidates.push(data);
+        this.pendingCandidates.push(data as RTCIceCandidateInit);
         return;
       }
       try {
-        await this.pc.addIceCandidate(data);
+        await this.pc.addIceCandidate(data as RTCIceCandidateInit);
       } catch {}
       return;
     }
 
     const desc = data as RTCSessionDescriptionInit;
-    const offerCollision =
-      desc.type === "offer" &&
-      (this.makingOffer || this.pc.signalingState !== "stable");
+
+    // Perfect negotiation: both peers may create an offer at the same time
+    // (e.g. both enable their camera). The polite peer rolls its offer back
+    // and accepts the remote one; the impolite peer ignores the collision.
+    const readyForOffer =
+      !this.makingOffer &&
+      (this.pc.signalingState === "stable" ||
+        this.isSettingRemoteAnswerPending);
+    const offerCollision = desc.type === "offer" && !readyForOffer;
+
     this.ignoreOffer = !this.polite && offerCollision;
     if (this.ignoreOffer) return;
 
-    await this.flushPendingCandidates();
-    await this.pc.setRemoteDescription(desc);
-    if (desc.type === "offer") {
-      await this.pc.setLocalDescription();
-      if (this.pc.localDescription) {
-        this.cb.onSignal("answer", JSON.stringify(this.pc.localDescription));
+    try {
+      if (offerCollision) {
+        await this.pc.setLocalDescription({ type: "rollback" });
       }
+
+      this.isSettingRemoteAnswerPending = desc.type === "answer";
+      await this.pc.setRemoteDescription(desc);
+      this.isSettingRemoteAnswerPending = false;
+
+      // Candidates are only usable once the remote description exists.
+      await this.flushPendingCandidates();
+
+      if (desc.type === "offer") {
+        await this.pc.setLocalDescription();
+        if (this.pc.localDescription) {
+          this.cb.onSignal("answer", JSON.stringify(this.pc.localDescription));
+        }
+      }
+    } catch {
+      this.isSettingRemoteAnswerPending = false;
     }
   }
 

@@ -5,7 +5,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import type { Map as MapboxMap, Marker } from "mapbox-gl";
 import type { PeerDot } from "@/lib/types";
 
-const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "pk.eyJ1IjoicHVsc2UtbWFwIiwiYSI6ImNrMDBkZW1vMDAwMDAwMDAifQ.AAAAAAAAAAAAAAAAAAAAAA";
+const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
 function dotColor(id: string): string {
   let hash = 0;
@@ -30,7 +30,9 @@ export default function WorldMap({
   const mapRef = useRef<MapboxMap | null>(null);
   const markersRef = useRef<Map<string, Marker>>(new Map());
   const meMarkerRef = useRef<Marker | null>(null);
+  const busyIdsRef = useRef<Set<string>>(new Set());
   const [ready, setReady] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   // Marker click handlers are bound once, so read the live click handler +
   // connectability through refs (synced in an effect, never during render).
@@ -46,29 +48,57 @@ export default function WorldMap({
     if (!TOKEN || !containerRef.current) return;
     let cancelled = false;
     const markers = markersRef.current;
+    const busyIds = busyIdsRef.current;
 
     (async () => {
-      const mapboxgl = (await import("mapbox-gl")).default;
-      if (cancelled || !containerRef.current) return;
-      mapboxgl.accessToken = TOKEN;
-      const map = new mapboxgl.Map({
-        container: containerRef.current,
-        style: "mapbox://styles/mapbox/dark-v11",
-        // Open centered on the user if we know where they are, else world view.
-        center: me ? [me.lng, me.lat] : [0, 20],
-        zoom: me ? 4 : 1.4,
-        attributionControl: true,
-      });
-      map.on("load", () => {
-        if (!cancelled) setReady(true);
-      });
-      mapRef.current = map;
+      try {
+        const mapboxgl = (await import("mapbox-gl")).default;
+        if (cancelled || !containerRef.current) return;
+        mapboxgl.accessToken = TOKEN;
+        const map = new mapboxgl.Map({
+          container: containerRef.current,
+          style: "mapbox://styles/mapbox/dark-v11",
+          // Open centered on the user if we know where they are, else world view.
+          center: me ? [me.lng, me.lat] : [0, 20],
+          zoom: me ? 4 : 1.4,
+          attributionControl: true,
+        });
+        map.on("load", () => {
+          if (!cancelled) {
+            setMapError(null);
+            setReady(true);
+          }
+        });
+        // Surface auth/style failures instead of a silent blank map. Tile
+        // errors after the style loads are noise, so ignore those.
+        map.on("error", (event) => {
+          if (cancelled || map.isStyleLoaded()) return;
+          const err = event.error as (Error & { status?: number }) | undefined;
+          const status = err?.status;
+          const message = err?.message ?? "";
+          setMapError(
+            status === 401 ||
+              status === 403 ||
+              /token|unauthorized|forbidden/i.test(message)
+              ? "The map couldn't load — your Mapbox token is invalid or expired."
+              : "The map couldn't load. Check your connection and reload.",
+          );
+        });
+        mapRef.current = map;
+      } catch {
+        if (!cancelled) {
+          setMapError(
+            "The map couldn't load. Check NEXT_PUBLIC_MAPBOX_TOKEN and reload.",
+          );
+        }
+      }
     })();
 
     return () => {
       cancelled = true;
       markers.forEach((m) => m.remove());
       markers.clear();
+      busyIds.clear();
       meMarkerRef.current?.remove();
       meMarkerRef.current = null;
       mapRef.current?.remove();
@@ -129,7 +159,10 @@ export default function WorldMap({
           el.title = "Tap to connect";
           el.addEventListener("click", (e) => {
             e.stopPropagation();
-            if (canConnectRef.current) onPeerClickRef.current(peer.id);
+            // Busy users would auto-decline anyway; don't send a doomed request.
+            if (canConnectRef.current && !busyIdsRef.current.has(peer.id)) {
+              onPeerClickRef.current(peer.id);
+            }
           });
           marker = new mapboxgl.Marker({ element: el })
             .setLngLat([peer.lng, peer.lat])
@@ -140,6 +173,8 @@ export default function WorldMap({
           marker.setLngLat([peer.lng, peer.lat]);
         }
         marker.getElement().style.opacity = peer.busy ? "0.35" : "1";
+        if (peer.busy) busyIdsRef.current.add(peer.id);
+        else busyIdsRef.current.delete(peer.id);
       }
 
       // Drop markers for peers that went offline / got filtered out.
@@ -147,6 +182,7 @@ export default function WorldMap({
         if (!seen.has(id)) {
           marker.remove();
           markers.delete(id);
+          busyIdsRef.current.delete(id);
         }
       }
     })();
@@ -166,6 +202,14 @@ export default function WorldMap({
             Set{" "}
             <code className="text-emerald-400">NEXT_PUBLIC_MAPBOX_TOKEN</code> in{" "}
             <code>.env</code> to load the map.
+          </p>
+        </div>
+      )}
+
+      {mapError && (
+        <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
+          <p className="max-w-md rounded-lg bg-zinc-800 p-4 text-sm text-zinc-200">
+            {mapError}
           </p>
         </div>
       )}

@@ -178,6 +178,23 @@
   border-style: dashed;
 }
 
+.pulse-dot.is-targeted::after {
+  transform: scale(1.35);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, currentColor 35%, transparent),
+    0 0 26px 6px color-mix(in srgb, currentColor 65%, transparent);
+}
+
+.pulse-dot.is-targeted::before {
+  animation: ping-ring 0.9s cubic-bezier(0, 0, 0.2, 1) infinite;
+  opacity: 0.4;
+}
+
+.pulse-dot.is-targeted .pulse-dot-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .pulse-dot-tip {
   position: absolute;
   bottom: calc(100% + 6px);

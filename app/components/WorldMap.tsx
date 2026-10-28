@@ -2,12 +2,30 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { Map as MapboxMap, Marker } from "mapbox-gl";
-import { Copy, LocateFixed, Minus, Plus, RadioTower } from "lucide-react";
+import type { Map as MapboxMap, Marker, GeoJSONSource } from "mapbox-gl";
+import type { Feature, LineString, Point } from "geojson";
+import {
+  Copy,
+  LocateFixed,
+  Minus,
+  Plus,
+  RadioTower,
+  Sparkles,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import type { PeerDot } from "@/lib/types";
 import { dotColor } from "@/lib/colors";
+import { greatCirclePath } from "@/lib/geo";
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
+
+export interface LinkPeer {
+  lat: number;
+  lng: number;
+  color: string;
+  distanceKm: number;
+}
 
 export default function WorldMap({
   peers,
@@ -15,18 +33,25 @@ export default function WorldMap({
   onPeerClick,
   canConnect,
   onNotify,
+  linkPeer,
+  soundOn,
+  onToggleSound,
 }: {
   peers: PeerDot[];
   me: { lat: number; lng: number } | null;
   onPeerClick: (id: string) => void;
   canConnect: boolean;
   onNotify: (text: string) => void;
+  linkPeer: LinkPeer | null;
+  soundOn: boolean;
+  onToggleSound: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const markersRef = useRef<Map<string, Marker>>(new Map());
   const meMarkerRef = useRef<Marker | null>(null);
   const busyIdsRef = useRef<Set<string>>(new Set());
+  const sparkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ready, setReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
 
@@ -101,6 +126,7 @@ export default function WorldMap({
       markers.forEach((m) => m.remove());
       markers.clear();
       busyIds.clear();
+      if (sparkTimer.current) clearTimeout(sparkTimer.current);
       meMarkerRef.current?.remove();
       meMarkerRef.current = null;
       mapRef.current?.remove();
@@ -208,6 +234,152 @@ export default function WorldMap({
     };
   }, [peers, ready]);
 
+  // Draw the great-circle "link" arc while two people are connected.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+
+    removeLinkLayers(map);
+    if (!linkPeer || !me) return;
+
+    let cancelled = false;
+    let frame = 0;
+    const points = greatCirclePath(me, linkPeer, 96);
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    try {
+      map.addSource("link-arc", { type: "geojson", data: lineFeature(points) });
+      map.addSource("link-comet", {
+        type: "geojson",
+        data: pointFeature(points[Math.floor(points.length / 2)]),
+      });
+      map.addLayer({
+        id: "link-arc-glow",
+        type: "line",
+        source: "link-arc",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": linkPeer.color,
+          "line-width": 16,
+          "line-opacity": 0.22,
+          "line-blur": 12,
+        },
+      });
+      map.addLayer({
+        id: "link-arc-beam",
+        type: "line",
+        source: "link-arc",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": linkPeer.color,
+          "line-width": 4.5,
+          "line-opacity": 0.55,
+          "line-blur": 2,
+        },
+      });
+      map.addLayer({
+        id: "link-arc-core",
+        type: "line",
+        source: "link-arc",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": 1.7,
+          "line-opacity": 0.92,
+        },
+      });
+      map.addLayer({
+        id: "link-comet-glow",
+        type: "circle",
+        source: "link-comet",
+        paint: {
+          "circle-color": linkPeer.color,
+          "circle-radius": 17,
+          "circle-opacity": 0.24,
+          "circle-blur": 1,
+        },
+      });
+      map.addLayer({
+        id: "link-comet",
+        type: "circle",
+        source: "link-comet",
+        paint: {
+          "circle-color": "#ffffff",
+          "circle-radius": 4.5,
+          "circle-opacity": 1,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": linkPeer.color,
+          "circle-stroke-opacity": 0.95,
+        },
+      });
+    } catch {
+      removeLinkLayers(map);
+      return;
+    }
+
+    // Frame both people, leaving room for the chat drawer on desktop.
+    const lngs = points.map((p) => p[0]);
+    const lats = points.map((p) => p[1]);
+    const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+    map.fitBounds(
+      [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ],
+      {
+        padding: isDesktop
+          ? { top: 140, bottom: 140, left: 120, right: 500 }
+          : { top: 120, bottom: 120, left: 50, right: 50 },
+        maxZoom: 5.5,
+        duration: reduce ? 0 : 1200,
+        essential: true,
+      },
+    );
+
+    const arcSource = map.getSource("link-arc") as GeoJSONSource | undefined;
+    const cometSource = map.getSource("link-comet") as GeoJSONSource | undefined;
+
+    if (reduce) {
+      arcSource?.setData(lineFeature(points));
+      return () => removeLinkLayers(map);
+    }
+
+    const started = performance.now();
+    const cometStart = started + 950;
+
+    function animateComet(now: number) {
+      if (cancelled) return;
+      const elapsed = Math.max(0, now - cometStart);
+      const progress = (elapsed % 2600) / 2600;
+      const index = Math.min(
+        points.length - 1,
+        Math.floor(progress * (points.length - 1)),
+      );
+      cometSource?.setData(pointFeature(points[index]));
+      frame = requestAnimationFrame(animateComet);
+    }
+
+    function drawArc(now: number) {
+      if (cancelled) return;
+      const progress = Math.min(1, (now - started) / 950);
+      const count = Math.max(2, Math.round(progress * points.length));
+      arcSource?.setData(lineFeature(points.slice(0, count)));
+      if (progress < 1) {
+        frame = requestAnimationFrame(drawArc);
+      } else {
+        frame = requestAnimationFrame(animateComet);
+      }
+    }
+
+    frame = requestAnimationFrame(drawArc);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      removeLinkLayers(map);
+    };
+  }, [linkPeer, me, ready]);
+
   function recenter() {
     const map = mapRef.current;
     const pos = meRef.current;
@@ -226,6 +398,40 @@ export default function WorldMap({
     if (!map) return;
     if (delta === 1) map.zoomIn();
     else map.zoomOut();
+  }
+
+  // Pick a random open stranger, fly to their signal, then send the request.
+  function findSpark() {
+    if (!canConnectRef.current) return;
+    const candidates = peers.filter((peer) => !peer.busy);
+    if (candidates.length === 0) {
+      onNotifyRef.current("No one else is online yet");
+      return;
+    }
+    const peer = candidates[Math.floor(Math.random() * candidates.length)];
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const marker = markersRef.current.get(peer.id);
+    marker?.getElement().classList.add("is-targeted");
+    window.setTimeout(() => {
+      marker?.getElement().classList.remove("is-targeted");
+    }, 1700);
+
+    const map = mapRef.current;
+    if (map) {
+      map.flyTo({
+        center: [peer.lng, peer.lat],
+        zoom: Math.max(map.getZoom(), 3.6),
+        duration: reduce ? 0 : 1400,
+        essential: true,
+      });
+    }
+
+    if (sparkTimer.current) clearTimeout(sparkTimer.current);
+    sparkTimer.current = setTimeout(
+      () => onPeerClickRef.current(peer.id),
+      reduce ? 0 : 1200,
+    );
   }
 
   async function copyInvite() {
@@ -316,8 +522,32 @@ export default function WorldMap({
         </div>
       )}
 
+      {/* Find a spark */}
+      {ready && canConnect && peers.some((peer) => !peer.busy) && (
+        <button
+          type="button"
+          onClick={findSpark}
+          className="pointer-events-auto absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-pulse/30 bg-panel/80 px-4 py-2.5 text-sm font-medium text-haze shadow-[0_0_34px_-10px_rgba(94,234,212,0.65)] backdrop-blur-xl transition hover:border-pulse/60 hover:text-pulse"
+        >
+          <Sparkles aria-hidden className="h-4 w-4 text-pulse" />
+          <span className="hidden sm:inline">Find a spark</span>
+          <span className="sm:hidden">Surprise me</span>
+        </button>
+      )}
+
       {/* Map controls */}
       <div className="pointer-events-auto absolute bottom-20 right-4 z-10 flex flex-col gap-2 md:bottom-24 md:right-6">
+        <MapButton
+          label={soundOn ? "Mute sounds" : "Unmute sounds"}
+          onClick={onToggleSound}
+          pressed={!soundOn}
+        >
+          {soundOn ? (
+            <Volume2 aria-hidden className="h-4 w-4" />
+          ) : (
+            <VolumeX aria-hidden className="h-4 w-4" />
+          )}
+        </MapButton>
         <MapButton label="Recenter on me" onClick={recenter} disabled={!me}>
           <LocateFixed aria-hidden className="h-4 w-4" />
         </MapButton>
@@ -365,11 +595,13 @@ function MapButton({
   label,
   onClick,
   disabled,
+  pressed,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  pressed?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -377,11 +609,54 @@ function MapButton({
       type="button"
       aria-label={label}
       title={label}
+      aria-pressed={pressed}
       onClick={onClick}
       disabled={disabled}
-      className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-panel/80 text-haze shadow-lg shadow-black/20 backdrop-blur-xl transition hover:border-pulse/40 hover:text-pulse disabled:cursor-not-allowed disabled:opacity-40"
+      className={`grid h-10 w-10 place-items-center rounded-full border shadow-lg shadow-black/20 backdrop-blur-xl transition hover:border-pulse/40 hover:text-pulse disabled:cursor-not-allowed disabled:opacity-40 ${
+        pressed
+          ? "border-pulse/40 bg-pulse/10 text-pulse"
+          : "border-white/10 bg-panel/80 text-haze"
+      }`}
     >
       {children}
     </button>
   );
+}
+
+const LINK_LAYERS = [
+  "link-comet",
+  "link-comet-glow",
+  "link-arc-core",
+  "link-arc-beam",
+  "link-arc-glow",
+];
+const LINK_SOURCES = ["link-comet", "link-arc"];
+
+function lineFeature(coords: Array<[number, number]>): Feature<LineString> {
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: { type: "LineString", coordinates: coords },
+  };
+}
+
+function pointFeature(coord: [number, number]): Feature<Point> {
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: { type: "Point", coordinates: coord },
+  };
+}
+
+function removeLinkLayers(map: MapboxMap) {
+  try {
+    for (const id of LINK_LAYERS) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+    for (const id of LINK_SOURCES) {
+      if (map.getSource(id)) map.removeSource(id);
+    }
+  } catch {
+    // The map was torn down while the link was active.
+  }
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Send, Video, X } from "lucide-react";
 import { alpha } from "@/lib/colors";
+import { formatDistance } from "@/lib/geo";
 
 export interface ChatMessage {
   id: number;
@@ -24,6 +25,7 @@ export default function ChatPanel({
   messages,
   connected,
   accent,
+  distanceKm,
   videoBusy,
   onSend,
   onStartVideo,
@@ -32,6 +34,7 @@ export default function ChatPanel({
   messages: ChatMessage[];
   connected: boolean;
   accent: string;
+  distanceKm?: number;
   videoBusy: boolean;
   onSend: (text: string) => void;
   onStartVideo: () => void;
@@ -87,14 +90,19 @@ export default function ChatPanel({
 
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium leading-5 text-haze">Stranger</p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-mist">
+          <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-mist">
             {connected ? (
               <>
                 <span
                   aria-hidden
-                  className="h-1.5 w-1.5 rounded-full bg-pulse shadow-[0_0_8px_2px_rgba(94,234,212,0.55)]"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-pulse shadow-[0_0_8px_2px_rgba(94,234,212,0.55)]"
                 />
-                Connected · peer-to-peer
+                <span className="truncate">
+                  Connected
+                  {distanceKm !== undefined
+                    ? ` · ≈ ${formatDistance(distanceKm)}`
+                    : " · peer-to-peer"}
+                </span>
               </>
             ) : (
               <>
@@ -151,6 +159,11 @@ export default function ChatPanel({
             <p className="mt-5 text-sm font-medium text-haze">
               You&rsquo;re connected to a stranger.
             </p>
+            {distanceKm !== undefined && (
+              <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-mist/80">
+                ≈ {formatDistance(distanceKm)} apart
+              </p>
+            )}
             <p className="mt-1.5 max-w-[16rem] text-xs leading-relaxed text-mist">
               Say hi — messages travel straight between you and never touch the
               server.

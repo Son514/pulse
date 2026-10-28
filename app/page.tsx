@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import EntryGate from "./components/EntryGate";
 import WorldMap from "./components/WorldMap";
@@ -8,10 +8,13 @@ import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
 import Toast, { type ToastData } from "./components/Toast";
+import LinkBanner from "./components/LinkBanner";
 import { join, leave, poll, sendSignal, ApiError } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl, type MediaState } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { dotColor } from "@/lib/colors";
+import { distanceKm } from "@/lib/geo";
+import { primeAudio, playLinkSound, playUnlinkSound } from "@/lib/sound";
 import { type PeerDot, type SignalMsg, type SignalType } from "@/lib/types";
 
 type Conn =
@@ -24,6 +27,15 @@ type Conn =
 type VideoState = "none" | "requesting" | "incoming" | "active";
 
 const REQUEST_TIMEOUT_MS = 30_000;
+
+function initialSoundOn(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem("pulse.sound") !== "off";
+  } catch {
+    return true;
+  }
+}
 
 export default function Home() {
   const [phase, setPhase] = useState<"gate" | "live">("gate");
@@ -38,6 +50,8 @@ export default function Home() {
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(
     null,
   );
+  const [linkVisible, setLinkVisible] = useState(false);
+  const [soundOn, setSoundOn] = useState(initialSoundOn);
   // Used by the poll loop (which shouldn't restart when the pin moves).
   const myLocationRef = useRef(myLocation);
   useEffect(() => {
@@ -64,6 +78,16 @@ export default function Home() {
   const sessionTokenRef = useRef<string | null>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const soundOnRef = useRef(soundOn);
+  useEffect(() => {
+    soundOnRef.current = soundOn;
+  }, [soundOn]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("pulse.sound", soundOn ? "on" : "off");
+    } catch {}
+  }, [soundOn]);
 
   function showNotice(text: string) {
     const id = ++noticeId.current;
@@ -90,6 +114,9 @@ export default function Home() {
   function teardown(message?: string) {
     if (requestTimer.current) clearTimeout(requestTimer.current);
     if (disconnectTimer.current) clearTimeout(disconnectTimer.current);
+    if (linkTimer.current) clearTimeout(linkTimer.current);
+    linkTimer.current = null;
+    const wasConnected = connRef.current.kind === "connected";
     peerRef.current?.close();
     peerRef.current = null;
     setLocalStream(null);
@@ -98,7 +125,9 @@ export default function Home() {
     setRemoteMedia({ mic: true, cam: true });
     setVideo("none");
     setMessages([]);
+    setLinkVisible(false);
     setConn({ kind: "idle" });
+    if (wasConnected && soundOnRef.current) playUnlinkSound();
     if (message) showNotice(message);
   }
 
@@ -138,6 +167,16 @@ export default function Home() {
       },
       onChannelOpen: () => {
         setConn({ kind: "connected", peerId });
+        if (soundOnRef.current) playLinkSound();
+        // Give the connection moment a beat on the map before the chat opens.
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          if (linkTimer.current) clearTimeout(linkTimer.current);
+          setLinkVisible(true);
+          linkTimer.current = setTimeout(() => {
+            linkTimer.current = null;
+            setLinkVisible(false);
+          }, 2200);
+        }
       },
     });
     peerRef.current = ps;
@@ -184,6 +223,7 @@ export default function Home() {
 
   function requestConnection(peerId: string) {
     if (connRef.current.kind !== "idle") return;
+    primeAudio();
     setConn({ kind: "requesting", peerId });
     signal(peerId, "request");
     requestTimer.current = setTimeout(() => {
@@ -206,6 +246,7 @@ export default function Home() {
 
   function acceptIncoming() {
     if (connRef.current.kind !== "incoming") return;
+    primeAudio();
     const peerId = connRef.current.peerId;
     startPeer(peerId, false);
     signal(peerId, "accept");
@@ -415,6 +456,7 @@ export default function Home() {
   }, [sessionId, phase]);
 
   async function handleReady(lat: number, lng: number) {
+    primeAudio();
     // The server applies the 1–3 km privacy offset and issues the session
     // token. Use the returned coords so my own pin sits where everyone else
     // sees me — not at my real location.
@@ -425,16 +467,41 @@ export default function Home() {
     setPhase("live");
   }
 
-  if (phase === "gate") {
-    return <EntryGate onReady={handleReady} />;
-  }
-
-  const inChat = conn.kind === "connecting" || conn.kind === "connected";
   const activePeerId =
     conn.kind === "connecting" || conn.kind === "connected"
       ? conn.peerId
       : null;
+
+  // Memoised so the map's arc effect doesn't restart on every poll tick.
+  const linkedPeerId = conn.kind === "connected" ? conn.peerId : null;
+  const linkedPeer = linkedPeerId
+    ? peers.find((peer) => peer.id === linkedPeerId) ?? null
+    : null;
+  const linkedLat = linkedPeer?.lat;
+  const linkedLng = linkedPeer?.lng;
+  const linkPeer = useMemo(() => {
+    if (
+      !linkedPeerId ||
+      linkedLat === undefined ||
+      linkedLng === undefined ||
+      !myLocation
+    ) {
+      return null;
+    }
+    return {
+      lat: linkedLat,
+      lng: linkedLng,
+      color: dotColor(linkedPeerId),
+      distanceKm: distanceKm(myLocation, { lat: linkedLat, lng: linkedLng }),
+    };
+  }, [linkedPeerId, linkedLat, linkedLng, myLocation]);
+
   const peerAccent = activePeerId ? dotColor(activePeerId) : "#5eead4";
+  const showChat = conn.kind === "connected" && !linkVisible;
+
+  if (phase === "gate") {
+    return <EntryGate onReady={handleReady} />;
+  }
 
   return (
     <main className="fixed inset-0 overflow-hidden">
@@ -444,9 +511,19 @@ export default function Home() {
         onPeerClick={requestConnection}
         canConnect={conn.kind === "idle"}
         onNotify={showNotice}
+        linkPeer={linkPeer}
+        soundOn={soundOn}
+        onToggleSound={() => setSoundOn((on) => !on)}
       />
 
       <Toast toast={notice} />
+
+      <LinkBanner
+        status={conn.kind === "connecting" ? "locking" : "linked"}
+        accent={conn.kind === "connecting" ? peerAccent : linkPeer?.color ?? peerAccent}
+        distanceKm={linkPeer?.distanceKm}
+        visible={conn.kind === "connecting" || linkVisible}
+      />
 
       {conn.kind === "requesting" && (
         <div className="panel-in absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full border border-white/10 bg-panel/85 px-4 py-2 text-sm text-haze shadow-xl shadow-black/30 backdrop-blur-xl">
@@ -474,11 +551,12 @@ export default function Home() {
         />
       )}
 
-      {inChat && (
+      {showChat && (
         <ChatPanel
           messages={messages}
-          connected={conn.kind === "connected"}
+          connected
           accent={peerAccent}
+          distanceKm={linkPeer?.distanceKm}
           videoBusy={video !== "none"}
           onSend={(text) => {
             peerRef.current?.sendChat(text);

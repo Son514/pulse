@@ -332,7 +332,14 @@ export default function Home() {
 
   useEffect(() => {
     if (!sessionId || phase !== "live") return;
-    const onLeave = () => leave(sessionId);
+    const onLeave = () => {
+      const c = connRef.current;
+      const peerId =
+        c.kind === "connecting" || c.kind === "connected"
+          ? c.peerId
+          : undefined;
+      leave(sessionId, peerId);
+    };
     window.addEventListener("pagehide", onLeave);
     window.addEventListener("beforeunload", onLeave);
     return () => {

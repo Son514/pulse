@@ -36,9 +36,10 @@ export async function sendSignal(
   });
 }
 
-// Fire-and-forget leave that survives the tab closing.
-export function leave(id: string): void {
-  const body = JSON.stringify({ id });
+// Fire-and-forget leave that survives the tab closing. If we're mid-call, the
+// server also frees the peer and tells them we're gone.
+export function leave(id: string, peerId?: string): void {
+  const body = JSON.stringify(peerId ? { id, peerId } : { id });
   if (typeof navigator !== "undefined" && navigator.sendBeacon) {
     navigator.sendBeacon("/api/leave", body);
   } else {

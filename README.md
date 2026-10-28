@@ -98,6 +98,13 @@ Run it against a **disposable** database — the suite creates and removes rando
 ephemeral sessions. In CI it runs on a Postgres service container; see
 `.github/workflows/api-tests.yml`.
 
+### Deploying
+
+Production builds apply the Prisma schema automatically
+(`scripts/migrate-on-vercel.mjs`) using `PRISMA_DATABASE_URL` or `DATABASE_URL`,
+so a hosted Neon database cannot drift behind the deployed Prisma Client.
+Preview builds skip this step.
+
 ---
 
 ## The phases

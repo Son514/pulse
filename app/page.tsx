@@ -412,9 +412,11 @@ export default function Home() {
 
       {conn.kind === "incoming" && (
         <ConnectionPrompt
-          title="A stranger wants to connect"
+          title="A stranger is signalling"
+          subtitle="They found your dot and want to connect. Nothing is stored."
           acceptLabel="Accept"
           declineLabel="Decline"
+          accent={dotColor(conn.peerId)}
           onAccept={acceptIncoming}
           onDecline={declineIncoming}
         />
@@ -444,10 +446,12 @@ export default function Home() {
 
       {video === "incoming" && (
         <ConnectionPrompt
-          title="Start video call?"
-          subtitle="The stranger wants to turn on video."
+          title="Start a video call?"
+          subtitle="They want to turn on cameras. Nothing is recorded."
           acceptLabel="Accept"
           declineLabel="Decline"
+          accent={peerAccent}
+          icon="video"
           onAccept={acceptVideo}
           onDecline={declineVideo}
         />

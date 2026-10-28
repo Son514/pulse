@@ -12,13 +12,17 @@ datasource db {
 }
 
 model Presence {
-  id       String   @id // client-generated session uuid
-  lat      Float // ALREADY privacy-offset coords (raw is never stored)
-  lng      Float
-  busy     Boolean  @default(false) // true while in an active connection
-  lastSeen DateTime
+  id            String    @id // client-generated session uuid
+  lat           Float // ALREADY privacy-offset coords (raw is never stored)
+  lng           Float
+  busy          Boolean   @default(false) // true while in an active connection
+  lastSeen      DateTime
+  peerId        String? // active connection partner
+  pendingPeerId String? // partner in an outstanding connection request
+  pendingSince  DateTime? // when that request was made (for stale cleanup)
 
   @@index([lastSeen])
+  @@index([pendingSince])
 }
 
 model Signal {

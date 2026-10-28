@@ -1,51 +1,73 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { STALE_MS, SIGNAL_TTL_MS } from "@/lib/presence";
+import { STALE_MS, SIGNAL_TTL_MS, PENDING_TTL_MS } from "@/lib/presence";
 import { isValidLatLng } from "@/lib/geo";
+import { bearerToken, isSessionId, verifySessionToken } from "@/lib/session";
+import { jsonError, jsonNoStore } from "@/lib/auth";
 import type { PollResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/poll?id= — the single endpoint that drives the live map.
-// It (1) heartbeats the caller, (2) reaps stale presence + orphan signals,
-// (3) returns the filtered online peers, and (4) drains this user's mailbox.
+// GET /api/poll?id=&lat=&lng= — the single endpoint that drives the live map.
+// Requires the caller's bearer token. It (1) heartbeats the caller, (2) reaps
+// stale presence + orphan signals, (3) returns filtered online peers, and
+// (4) drains this user's mailbox.
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const id = params.get("id");
 
-  if (!id) {
-    return Response.json({ error: "missing id" }, { status: 400 });
-  }
+  if (!isSessionId(id)) return jsonError(400, "invalid id");
+
+  const token = bearerToken(request);
+  if (!token) return jsonError(401, "missing token");
+  if (!verifySessionToken(id, token)) return jsonError(401, "invalid token");
 
   const now = Date.now();
   const staleCutoff = new Date(now - STALE_MS);
   const signalCutoff = new Date(now - SIGNAL_TTL_MS);
 
-  // 1) Heartbeat — refresh lastSeen for the caller only. (Updating every row
-  // would keep abandoned sessions alive forever.) If the caller supplies its
-  // offset coordinates, upsert: this re-registers a session whose row was
-  // reaped while its tab was asleep, throttled, or restored from bfcache.
   const latParam = params.get("lat");
   const lngParam = params.get("lng");
   const lat = latParam ? Number(latParam) : NaN;
   const lng = lngParam ? Number(lngParam) : NaN;
 
-  if (isValidLatLng(lat, lng)) {
-    await prisma.presence.upsert({
-      where: { id },
-      create: { id, lat: lat as number, lng: lng as number, busy: false, lastSeen: new Date(now) },
-      update: { lastSeen: new Date(now) },
-    });
-  } else {
+  // 1) Heartbeat the caller. If their row was reaped while the tab slept (or
+  // was restored from bfcache), re-create it from the supplied offset coords.
+  // The signed token proves the caller owns this id.
+  const existing = await prisma.presence.findUnique({
+    where: { id },
+    select: { id: true },
+  });
+
+  if (existing) {
     await prisma.presence.updateMany({
       where: { id },
       data: { lastSeen: new Date(now) },
     });
+  } else if (isValidLatLng(lat, lng)) {
+    try {
+      await prisma.presence.create({
+        data: { id, lat: lat as number, lng: lng as number, busy: false, lastSeen: new Date(now) },
+      });
+    } catch {
+      // Concurrent poll re-created it first; just heartbeat.
+      await prisma.presence.updateMany({
+        where: { id },
+        data: { lastSeen: new Date(now) },
+      });
+    }
+  } else {
+    return jsonError(401, "unknown session");
   }
 
-  // 2) Reap stale presence rows and orphaned signals (independent deletes —
-  // no atomicity needed, and avoids transactions over a PgBouncer pooler).
+  // 2) Reap stale presence rows, expired pending requests, and orphaned
+  // signals (independent deletes — no atomicity needed, and avoids
+  // transactions over a PgBouncer pooler).
+  await prisma.presence.updateMany({
+    where: { pendingSince: { lt: new Date(now - PENDING_TTL_MS) } },
+    data: { pendingPeerId: null, pendingSince: null },
+  });
   await prisma.presence.deleteMany({ where: { lastSeen: { lt: staleCutoff } } });
   await prisma.signal.deleteMany({ where: { createdAt: { lt: signalCutoff } } });
 
@@ -87,5 +109,5 @@ export async function GET(request: NextRequest) {
     })),
   };
 
-  return Response.json(response);
+  return jsonNoStore(response);
 }

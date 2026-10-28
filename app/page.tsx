@@ -8,11 +8,11 @@ import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
 import Toast, { type ToastData } from "./components/Toast";
-import { join, leave, poll, sendSignal } from "@/lib/api";
+import { join, leave, poll, sendSignal, ApiError } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl, type MediaState } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { dotColor } from "@/lib/colors";
-import { type PeerDot, type SignalMsg } from "@/lib/types";
+import { type PeerDot, type SignalMsg, type SignalType } from "@/lib/types";
 
 type Conn =
   | { kind: "idle" }
@@ -61,6 +61,7 @@ export default function Home() {
   const peerRef = useRef<PeerSession | null>(null);
   const msgId = useRef(0);
   const noticeId = useRef(0);
+  const sessionTokenRef = useRef<string | null>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -77,6 +78,13 @@ export default function Home() {
       ...prev,
       { id: msgId.current++, mine, text, at: Date.now() },
     ]);
+  }
+
+  // Every signaling call carries the session bearer token.
+  function signal(peerId: string, type: SignalType, payload?: string) {
+    const token = sessionTokenRef.current;
+    if (!token) return;
+    void sendSignal(sessionId, token, peerId, type, payload);
   }
 
   function teardown(message?: string) {
@@ -97,7 +105,8 @@ export default function Home() {
   function startPeer(peerId: string, initiator: boolean) {
     const ps = new PeerSession(initiator, {
       onSignal: (type: DescType, payload: string) => {
-        void sendSignal(sessionId, peerId, type, payload);
+        const token = sessionTokenRef.current;
+        if (token) void sendSignal(sessionId, token, peerId, type, payload);
       },
       onChat: (text) => addMessage(false, text),
       onControl: (ctrl) => handleControl(ctrl),
@@ -113,7 +122,7 @@ export default function Home() {
         }
         if (state === "failed") {
           // Tell the other side too — otherwise they sit in the chat forever.
-          void sendSignal(sessionId, peerId, "end");
+          signal(peerId, "end");
           teardown("Connection failed (network).");
           return;
         }
@@ -122,7 +131,7 @@ export default function Home() {
           // seconds to recover before ending the session for both peers.
           disconnectTimer.current = setTimeout(() => {
             disconnectTimer.current = null;
-            void sendSignal(sessionId, peerId, "end");
+            signal(peerId, "end");
             teardown("Connection lost.");
           }, 8000);
         }
@@ -176,13 +185,13 @@ export default function Home() {
   function requestConnection(peerId: string) {
     if (connRef.current.kind !== "idle") return;
     setConn({ kind: "requesting", peerId });
-    void sendSignal(sessionId, peerId, "request");
+    signal(peerId, "request");
     requestTimer.current = setTimeout(() => {
       if (
         connRef.current.kind === "requesting" &&
         connRef.current.peerId === peerId
       ) {
-        void sendSignal(sessionId, peerId, "end");
+        signal(peerId, "end");
         teardown("No answer.");
       }
     }, REQUEST_TIMEOUT_MS);
@@ -190,7 +199,7 @@ export default function Home() {
 
   function cancelRequest() {
     if (connRef.current.kind === "requesting") {
-      void sendSignal(sessionId, connRef.current.peerId, "end");
+      signal(connRef.current.peerId, "end");
     }
     teardown();
   }
@@ -199,20 +208,20 @@ export default function Home() {
     if (connRef.current.kind !== "incoming") return;
     const peerId = connRef.current.peerId;
     startPeer(peerId, false);
-    void sendSignal(sessionId, peerId, "accept");
+    signal(peerId, "accept");
     setConn({ kind: "connecting", peerId });
   }
 
   function declineIncoming() {
     if (connRef.current.kind !== "incoming") return;
-    void sendSignal(sessionId, connRef.current.peerId, "decline");
+    signal(connRef.current.peerId, "decline");
     setConn({ kind: "idle" });
   }
 
   function endConnection() {
     const c = connRef.current;
     if (c.kind === "connecting" || c.kind === "connected") {
-      void sendSignal(sessionId, c.peerId, "end");
+      signal(c.peerId, "end");
     }
     teardown();
   }
@@ -287,7 +296,7 @@ export default function Home() {
         if (connRef.current.kind === "idle") {
           setConn({ kind: "incoming", peerId: sig.fromId });
         } else {
-          void sendSignal(sessionId, sig.fromId, "decline");
+          signal(sig.fromId, "decline");
         }
         break;
       }
@@ -340,9 +349,13 @@ export default function Home() {
 
   const processSignalRef = useRef(processSignal);
   const teardownRef = useRef(teardown);
+  const showNoticeRef = useRef(showNotice);
+  const signalRef = useRef(signal);
   useEffect(() => {
     processSignalRef.current = processSignal;
     teardownRef.current = teardown;
+    showNoticeRef.current = showNotice;
+    signalRef.current = signal;
   });
 
   useEffect(() => {
@@ -351,9 +364,11 @@ export default function Home() {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async () => {
+      const token = sessionTokenRef.current;
+      if (!token) return;
       try {
         const me = myLocationRef.current;
-        const data = await poll(sessionId, me?.lat, me?.lng);
+        const data = await poll(sessionId, token, me?.lat, me?.lng);
         if (!active) return;
         setPeers(data.peers);
         for (const s of data.signals) processSignalRef.current(s);
@@ -367,12 +382,17 @@ export default function Home() {
             if (c.kind === "incoming") {
               setConn({ kind: "idle" });
             } else {
-              void sendSignal(sessionId, c.peerId, "end");
+              signalRef.current(c.peerId, "end");
               teardownRef.current("Stranger disconnected.");
             }
           }
         }
-      } catch {}
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          showNoticeRef.current("Session expired — reload to rejoin.");
+          return;
+        }
+      }
       if (active) timer = setTimeout(tick, POLL_INTERVAL_MS);
     };
     tick();
@@ -385,14 +405,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!sessionId || phase !== "live") return;
-    const onLeave = () => {
-      const c = connRef.current;
-      const peerId =
-        c.kind === "connecting" || c.kind === "connected"
-          ? c.peerId
-          : undefined;
-      leave(sessionId, peerId);
-    };
+    const onLeave = () => leave(sessionId, sessionTokenRef.current);
     window.addEventListener("pagehide", onLeave);
     window.addEventListener("beforeunload", onLeave);
     return () => {
@@ -402,10 +415,12 @@ export default function Home() {
   }, [sessionId, phase]);
 
   async function handleReady(lat: number, lng: number) {
-    // The server applies the 1–3 km privacy offset. Use the coordinates it
-    // returns so my own pin sits where everyone else sees me — not at my real
-    // location.
+    // The server applies the 1–3 km privacy offset and issues the session
+    // token. Use the returned coords so my own pin sits where everyone else
+    // sees me — not at my real location.
     const pos = await join(sessionId, lat, lng);
+    if (!pos.token) throw new Error("join did not issue a session token");
+    sessionTokenRef.current = pos.token;
     setMyLocation({ lat: pos.lat, lng: pos.lng });
     setPhase("live");
   }

@@ -1,28 +1,45 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { jsonError, jsonNoStore } from "@/lib/auth";
+import { bearerToken, isSessionId, verifySessionToken } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// POST /api/leave — body { id, peerId? }. Removes the presence row and any
+// POST /api/leave — body { id, token }. Removes the presence row and any
 // pending signals to/from this user. Called via navigator.sendBeacon on tab
-// close, so the body may arrive as text — parse defensively. If the user was
-// mid-call, `peerId` lets us free them and notify them immediately.
+// close, so the body may arrive as text and the token may live in the body
+// (sendBeacon cannot set an Authorization header). If the user was pairing with
+// someone, the server frees that partner from its own recorded state.
 export async function POST(request: NextRequest) {
-  let id: string | undefined;
-  let peerId: string | undefined;
+  let body: Record<string, unknown> | undefined;
   try {
     const text = await request.text();
-    const body = text ? JSON.parse(text) : undefined;
-    id = body?.id as string | undefined;
-    peerId = body?.peerId as string | undefined;
+    const parsed = text ? JSON.parse(text) : undefined;
+    if (parsed && typeof parsed === "object") {
+      body = parsed as Record<string, unknown>;
+    }
   } catch {
-    id = undefined;
+    body = undefined;
   }
 
-  if (typeof id !== "string" || !id) {
-    return Response.json({ error: "invalid id" }, { status: 400 });
-  }
+  if (!body) return jsonError(400, "invalid body");
+
+  const { id } = body;
+  if (!isSessionId(id)) return jsonError(400, "invalid id");
+
+  const token =
+    bearerToken(request) ??
+    (typeof body.token === "string" ? body.token : null);
+  if (!token) return jsonError(401, "missing token");
+  if (!verifySessionToken(id, token)) return jsonError(401, "invalid token");
+
+  // Read the server's own pairing before deleting the row; never trust a
+  // client-supplied peer id here.
+  const row = await prisma.presence.findUnique({
+    where: { id },
+    select: { peerId: true, pendingPeerId: true },
+  });
 
   // Independent cleanup deletes — no atomicity needed (and interactive
   // transactions are unreliable over a PgBouncer pooler).
@@ -31,16 +48,23 @@ export async function POST(request: NextRequest) {
   });
   await prisma.presence.deleteMany({ where: { id } });
 
-  // Free the peer right away instead of making them wait for staleness.
-  if (typeof peerId === "string" && peerId && peerId !== id) {
+  // Free the real partner right away instead of making them wait for
+  // staleness / WebRTC failure detection.
+  const partner = row?.peerId ?? row?.pendingPeerId ?? null;
+  if (partner && isSessionId(partner) && partner !== id) {
     await prisma.presence.updateMany({
-      where: { id: peerId },
-      data: { busy: false },
+      where: { id: partner },
+      data: {
+        busy: false,
+        peerId: null,
+        pendingPeerId: null,
+        pendingSince: null,
+      },
     });
     await prisma.signal.create({
-      data: { fromId: id, toId: peerId, type: "end", payload: null },
+      data: { fromId: id, toId: partner, type: "end", payload: null },
     });
   }
 
-  return Response.json({ ok: true });
+  return jsonNoStore({ ok: true });
 }

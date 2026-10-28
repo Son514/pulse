@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, PhoneOff, Send, Video } from "lucide-react";
+import { Loader2, Send, Video, X } from "lucide-react";
 import { alpha } from "@/lib/colors";
 
 export interface ChatMessage {
@@ -41,7 +41,11 @@ export default function ChatPanel({
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    endRef.current?.scrollIntoView({
+      behavior: reduce ? "auto" : "smooth",
+      block: "end",
+    });
   }, [messages]);
 
   function submit(e: React.FormEvent) {
@@ -55,7 +59,7 @@ export default function ChatPanel({
   return (
     <section
       aria-label="Chat with stranger"
-      className="sheet-in absolute inset-x-0 bottom-0 z-20 flex max-h-[78svh] flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-panel/90 text-haze shadow-[0_-24px_70px_-20px_rgba(0,0,0,0.75)] backdrop-blur-2xl md:drawer-in md:inset-y-0 md:left-auto md:right-0 md:max-h-none md:w-[424px] md:rounded-none md:rounded-l-3xl md:border-y-0 md:border-r-0 md:shadow-[-24px_0_70px_-24px_rgba(0,0,0,0.75)]"
+      className="sheet-in absolute inset-x-0 bottom-0 z-20 flex max-h-[78svh] flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-panel/95 text-haze shadow-[0_-24px_70px_-20px_rgba(0,0,0,0.75)] backdrop-blur-2xl md:drawer-in md:inset-y-0 md:left-auto md:right-0 md:max-h-none md:w-[424px] md:rounded-none md:rounded-l-3xl md:border-y-0 md:border-r-0 md:shadow-[-24px_0_70px_-24px_rgba(0,0,0,0.75)]"
     >
       <header className="relative flex items-center gap-3 border-b border-white/[0.07] px-4 pb-3.5 pt-5 md:px-5 md:pt-3.5">
         <span
@@ -119,7 +123,7 @@ export default function ChatPanel({
             title="End connection"
             className="grid h-9 w-9 place-items-center rounded-full border border-ember/30 bg-ember/10 text-ember transition hover:bg-ember/20"
           >
-            <PhoneOff aria-hidden className="h-4 w-4" />
+            <X aria-hidden className="h-4 w-4" />
           </button>
         </div>
       </header>

@@ -78,7 +78,7 @@ export default function VideoPanel({
 
         {/* Remote media state */}
         {remoteStream && (!remoteMedia.mic || !remoteMedia.cam) && (
-          <div className="absolute inset-x-0 top-16 flex justify-center gap-2">
+          <div className="absolute inset-x-0 top-16 z-20 flex justify-center gap-2">
             {!remoteMedia.mic && (
               <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 backdrop-blur-xl">
                 <MicOff aria-hidden className="h-3 w-3 text-ember" />
